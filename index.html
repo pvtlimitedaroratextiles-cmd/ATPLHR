@@ -15981,7 +15981,40 @@ document.addEventListener('click', function(e) {
   }
 })();
 </script>
-    
+ <script>
+// OVERRIDE BROKEN UPLOAD (Fixes freeze in Browser 1)
+window.ATPLCentralFileSync = null;
+window.handleFiles = async function(list) {
+  var validFiles = (list || []).filter(function(file) {
+    return file && file.name && file.name.match(/\.(xlsx|xls|csv)$/i);
+  });
+  if (!validFiles.length) return;
+
+  for (var i = 0; i < validFiles.length; i++) {
+    var file = validFiles[i];
+    try {
+      var buf = await file.arrayBuffer();
+      var wb = parseWB(buf);
+      var sheets = wbToSheets(wb);
+      var now = new Date().toISOString();
+
+      window.FILES = (window.FILES || []).filter(function(f) { return f && f.name !== file.name; });
+      window.FILES.push({ name: file.name, wb: wb, sheets: sheets, buf: buf, savedAt: now });
+      saveFileToDB(file.name, buf);
+    } catch(err) {
+      console.error(err);
+    }
+  }
+
+  renderFiles(); 
+  renderSheets(); 
+  updStats(); 
+  renderAllFilesPage(); 
+  populateNJSelects();
+
+  if (window.showToast) window.showToast('✅ ' + validFiles.length + ' file(s) upload ho gayi!');
+};
+</script>   
 </body>
 </html>
 
