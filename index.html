@@ -16101,6 +16101,118 @@ window.handleFiles = async function(list) {
   }
 };
 </script>
+  <script>
+// ═════════════════════════════════════════════════════════════════
+// GOOGLE DRIVE PERMANENT CLOUD SYNC FOR ATPL
+// ═════════════════════════════════════════════════════════════════
+
+// 👇 Yahan Step 2 me mila hua Web App URL paste karna:
+const GOOGLE_SCRIPT_URL = "YAHAN_APNA_WEB_APP_URL_PASTE_KARO";
+
+// 1. WEBSITE KHULTE HI GOOGLE DRIVE SE SAARI FILES LAO
+async function syncFromGoogleDrive() {
+  if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("YAHAN_APNA")) return;
+  try {
+    if (window.showToast) window.showToast("☁️ Google Drive se files sync ho rahi hain...");
+    
+    const res = await fetch(GOOGLE_SCRIPT_URL);
+    const data = await res.json();
+
+    if (data.status === "success" && Array.isArray(data.files) && data.files.length > 0) {
+      data.files.forEach(f => {
+        if (f.buf && typeof atplB64ToBuf === "function") {
+          var buf = atplB64ToBuf(f.buf);
+          var wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true });
+          var sheets = {};
+          wb.SheetNames.forEach(function(sn) {
+            sheets[sn] = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', raw: false });
+          });
+
+          if (!Array.isArray(window.FILES)) window.FILES = [];
+          window.FILES = window.FILES.filter(function(x) { return x && x.name !== f.name; });
+          window.FILES.push({
+            name: f.name,
+            wb: wb,
+            sheets: sheets,
+            buf: buf,
+            savedAt: f.date
+          });
+
+          // IndexedDB me bhi daal do
+          if (typeof DB !== "undefined" && DB) {
+            try {
+              var tx = DB.transaction(DB_STORE, "readwrite");
+              tx.objectStore(DB_STORE).put({ name: f.name, buf: buf, saved: f.date });
+            } catch (e) {}
+          }
+        }
+      });
+
+      // Screen refresh karo
+      if (typeof renderFiles === "function") renderFiles();
+      if (typeof renderSheets === "function") renderSheets();
+      if (typeof updStats === "function") updStats();
+      if (typeof renderAllFilesPage === "function") renderAllFilesPage();
+      if (typeof populateNJSelects === "function") populateNJSelects();
+
+      if (window.showToast) window.showToast("✅ Google Drive se " + data.files.length + " files load ho gayi!");
+    }
+  } catch (err) {
+    console.warn("Drive sync error:", err);
+  }
+}
+
+// 2. JAB BROWSER 1 ME UPLOAD HO TO GOOGLE DRIVE BHEJO
+const driveOldHandleFiles = window.handleFiles;
+window.handleFiles = async function(list) {
+  if (typeof driveOldHandleFiles === "function") {
+    await driveOldHandleFiles(list);
+  }
+
+  // Ab Google Drive me background me bhejo
+  if (GOOGLE_SCRIPT_URL && !GOOGLE_SCRIPT_URL.includes("YAHAN_APNA")) {
+    (list || []).forEach(file => {
+      var found = (window.FILES || []).find(f => f && f.name === file.name);
+      if (found && found.buf && typeof atplBufToB64 === "function") {
+        var b64 = atplBufToB64(found.buf);
+        fetch(GOOGLE_SCRIPT_URL, {
+          method: "POST",
+          body: JSON.stringify({ action: "upload", name: found.name, buf: b64 })
+        }).then(function() {
+          console.log("✅ Google Drive me permanent save hua:", found.name);
+        }).catch(function(e) {
+          console.warn("Drive upload error", e);
+        });
+      }
+    });
+  }
+};
+
+// 3. JAB DELETE HO TO GOOGLE DRIVE SE BHI UDAO
+const driveOldRmFile = window.rmFile;
+window.rmFile = function(i) {
+  var target = (window.FILES || [])[i];
+  var targetName = target ? target.name : null;
+
+  if (typeof driveOldRmFile === "function") {
+    driveOldRmFile(i);
+  }
+
+  if (targetName && GOOGLE_SCRIPT_URL && !GOOGLE_SCRIPT_URL.includes("YAHAN_APNA")) {
+    fetch(GOOGLE_SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "delete", name: targetName })
+    }).then(function() {
+      console.log("🗑️ Google Drive se delete ho gaya:", targetName);
+    });
+  }
+};
+
+// Page load hone par Google Drive se sync chalu karo
+window.addEventListener("load", function() {
+  setTimeout(syncFromGoogleDrive, 1500);
+});
+</script>
 </body>
 </html>
 
