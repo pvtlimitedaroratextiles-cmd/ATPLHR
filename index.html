@@ -16015,6 +16015,92 @@ window.handleFiles = async function(list) {
   if (window.showToast) window.showToast('✅ ' + validFiles.length + ' file(s) upload ho gayi!');
 };
 </script>   
+  <!-- 1. Real Working Excel Reader CDN (Kyunki local file missing thi) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// ATPL GUARANTEED LOCAL UPLOAD FIX (Zero Crash, Instant Display)
+// ════════════════════════════════════════════════════════════════
+window.ATPLCentralFileSync = null; // Background dead sync block karo
+
+window.handleFiles = async function(list) {
+  var validFiles = (list || []).filter(function(file) {
+    return file && file.name && file.name.match(/\.(xlsx|xls|csv)$/i);
+  });
+  
+  if (!validFiles.length) {
+    alert("Kripya valid Excel (.xlsx / .xls / .csv) file upload karein.");
+    return;
+  }
+
+  // Agar XLSX library load nahi hui to CDN se lo
+  if (typeof XLSX === "undefined") {
+    alert("Excel reader library load ho rahi hai, kripya 2 second baad dobara upload karein.");
+    return;
+  }
+
+  var loadedCount = 0;
+
+  for (var i = 0; i < validFiles.length; i++) {
+    var file = validFiles[i];
+    try {
+      var buf = await file.arrayBuffer();
+      
+      // Excel parse karo
+      var wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true });
+      var sheets = {};
+      wb.SheetNames.forEach(function(sn) {
+        sheets[sn] = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', raw: false });
+      });
+
+      var now = new Date().toISOString();
+      var fileObj = {
+        name: file.name,
+        wb: wb,
+        sheets: sheets,
+        buf: buf,
+        savedAt: now
+      };
+
+      // State me daalo
+      if (!Array.isArray(window.FILES)) window.FILES = [];
+      window.FILES = window.FILES.filter(function(f) { return f && f.name !== file.name; });
+      window.FILES.push(fileObj);
+      
+      if (typeof FILES !== "undefined") {
+        FILES = window.FILES;
+      }
+
+      // IndexedDB me save karo
+      if (typeof saveFileToDB === "function") {
+        saveFileToDB(file.name, buf);
+      }
+
+      loadedCount++;
+    } catch(err) {
+      console.error("Excel parse error on " + file.name, err);
+      alert("Error reading file: " + file.name + "\n" + err.message);
+    }
+  }
+
+  if (loadedCount > 0) {
+    // Screen refresh karo
+    if (typeof renderFiles === "function") renderFiles();
+    if (typeof renderSheets === "function") renderSheets();
+    if (typeof updStats === "function") updStats();
+    if (typeof renderAllFilesPage === "function") renderAllFilesPage();
+    if (typeof populateNJSelects === "function") populateNJSelects();
+
+    var fc = document.getElementById('fileCount');
+    if (fc) fc.textContent = '(' + window.FILES.length + ')';
+    var sl = document.getElementById('storageLbl');
+    if (sl) sl.textContent = window.FILES.length + ' files saved';
+
+    if (window.showToast) window.showToast('✅ ' + loadedCount + ' file(s) screen par aa gayi!');
+  }
+};
+</script>
 </body>
 </html>
 
