@@ -15750,7 +15750,237 @@ document.addEventListener('click', function(e) {
         </div>
       </div>
     </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+<script>
+// ════════════════════════════════════════════════════════════════════════
+// ATPL 100% FREE REALTIME SYNC ENGINE (Bypasses Dead APIs, Auto-Sync Active)
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  'use strict';
 
+  if (window.location.hostname.includes("github.io")) {
+    window.ATPLCentralFileSync = null;
+  }
+
+  const BROKER_URL = "wss://broker.emqx.io:8084/mqtt";
+  const SYNC_TOPIC = "atpl/aroratextiles/erp_sync_channel_v1";
+  const CLIENT_ID = "atpl_" + Math.random().toString(36).substring(2, 10);
+
+  let client = null;
+
+  function initRealtimeSync() {
+    if (typeof mqtt === "undefined") {
+      setTimeout(initRealtimeSync, 300);
+      return;
+    }
+
+    try {
+      client = mqtt.connect(BROKER_URL, {
+        clientId: CLIENT_ID,
+        clean: true,
+        connectTimeout: 5000,
+        reconnectPeriod: 2500,
+        keepalive: 60
+      });
+
+      client.on("connect", function () {
+        console.log("⚡ [ATPL Realtime] Connected to Free Multi-Browser Broker!");
+        client.subscribe(SYNC_TOPIC, { qos: 1 });
+
+        setTimeout(function() {
+          if (client && client.connected) {
+            client.publish(SYNC_TOPIC, JSON.stringify({
+              sender: CLIENT_ID,
+              action: "REQUEST_ALL_FILES"
+            }));
+          }
+        }, 1000);
+
+        if (window.showToast) {
+          window.showToast("🟢 Live Cross-Browser Sync Active!");
+        }
+      });
+
+      client.on("message", function (topic, message) {
+        if (topic !== SYNC_TOPIC) return;
+        try {
+          const payload = JSON.parse(message.toString());
+          if (!payload || payload.sender === CLIENT_ID) return;
+
+          if (payload.action === "REQUEST_ALL_FILES") {
+            const list = Array.isArray(window.FILES) ? window.FILES : [];
+            if (list.length > 0 && typeof atplBufToB64 === "function") {
+              const filesData = list.map(f => ({
+                name: f.name,
+                buf: atplBufToB64(f.buf),
+                saved: f.savedAt || new Date().toISOString()
+              }));
+              client.publish(SYNC_TOPIC, JSON.stringify({
+                sender: CLIENT_ID,
+                action: "RESPONSE_ALL_FILES",
+                files: filesData
+              }));
+            }
+          }
+
+          if (payload.action === "RESPONSE_ALL_FILES") {
+            if (Array.isArray(payload.files)) {
+              payload.files.forEach(f => {
+                importFileToLocal(f.name, f.buf, f.saved);
+              });
+              refreshUI();
+            }
+          }
+
+          if (payload.action === "DELETE_FILE") {
+            const fileName = payload.name;
+            window.FILES = (window.FILES || []).filter(f => f && f.name !== fileName);
+
+            if (typeof DB !== "undefined" && DB) {
+              try {
+                const tx = DB.transaction(DB_STORE, "readwrite");
+                tx.objectStore(DB_STORE).delete(fileName);
+              } catch (e) {}
+            }
+
+            refreshUI();
+            if (window.showToast) {
+              window.showToast("🗑️ Dusre browser ne file delete ki: <b>" + fileName + "</b>");
+            }
+          }
+
+          if (payload.action === "UPLOAD_FILE") {
+            importFileToLocal(payload.name, payload.buf, payload.saved);
+            refreshUI();
+            if (window.showToast) {
+              window.showToast("⚡ Dusre browser se file sync hui: <b>" + payload.name + "</b>");
+            }
+          }
+
+          if (payload.action === "CLEAR_ALL") {
+            window.FILES = [];
+            if (typeof DB !== "undefined" && DB) {
+              try {
+                DB.transaction(DB_STORE, "readwrite").objectStore(DB_STORE).clear();
+              } catch (e) {}
+            }
+            refreshUI();
+            if (window.showToast) {
+              window.showToast("🗑️ Saari files clear ho gayi.");
+            }
+          }
+
+        } catch (err) {
+          console.warn("[Sync Message Error]", err);
+        }
+      });
+
+    } catch (e) {
+      console.warn("MQTT init error:", e);
+    }
+  }
+
+  function importFileToLocal(fileName, b64Data, savedAt) {
+    if (!b64Data || typeof atplB64ToBuf !== "function" || typeof parseWB !== "function") return;
+    try {
+      const buf = atplB64ToBuf(b64Data);
+      const wb = parseWB(buf);
+      const sheets = typeof wbToSheets === "function" ? wbToSheets(wb) : {};
+
+      window.FILES = (window.FILES || []).filter(f => f && f.name !== fileName);
+      window.FILES.push({
+        name: fileName,
+        wb: wb,
+        sheets: sheets,
+        buf: buf,
+        fromDB: true,
+        savedAt: savedAt || new Date().toISOString()
+      });
+
+      if (typeof DB !== "undefined" && DB) {
+        try {
+          const tx = DB.transaction(DB_STORE, "readwrite");
+          tx.objectStore(DB_STORE).put({
+            name: fileName,
+            buf: buf,
+            saved: savedAt || new Date().toISOString()
+          });
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.warn("Import error for:", fileName, err);
+    }
+  }
+
+  function refreshUI() {
+    if (typeof renderFiles === "function") renderFiles();
+    if (typeof renderSheets === "function") renderSheets();
+    if (typeof updStats === "function") updStats();
+    if (typeof renderAllFilesPage === "function") renderAllFilesPage();
+    if (typeof populateNJSelects === "function") populateNJSelects();
+  }
+
+  const oldHandleFiles = window.handleFiles;
+  window.handleFiles = async function (list) {
+    if (typeof oldHandleFiles === "function") {
+      await oldHandleFiles(list);
+    }
+    if (client && client.connected && Array.isArray(window.FILES)) {
+      (list || []).forEach(file => {
+        const found = window.FILES.find(f => f && f.name === file.name);
+        if (found && found.buf && typeof atplBufToB64 === "function") {
+          const b64 = atplBufToB64(found.buf);
+          client.publish(SYNC_TOPIC, JSON.stringify({
+            sender: CLIENT_ID,
+            action: "UPLOAD_FILE",
+            name: found.name,
+            buf: b64,
+            saved: new Date().toISOString()
+          }));
+        }
+      });
+    }
+  };
+
+  const oldRmFile = window.rmFile;
+  window.rmFile = function (i) {
+    const list = Array.isArray(window.FILES) ? window.FILES : [];
+    const targetFile = list[i];
+    const targetName = targetFile ? targetFile.name : null;
+
+    if (typeof oldRmFile === "function") {
+      oldRmFile(i);
+    }
+
+    if (targetName && client && client.connected) {
+      client.publish(SYNC_TOPIC, JSON.stringify({
+        sender: CLIENT_ID,
+        action: "DELETE_FILE",
+        name: targetName
+      }));
+    }
+  };
+
+  const oldClearAllFiles = window.clearAllFiles;
+  window.clearAllFiles = function () {
+    if (typeof oldClearAllFiles === "function") {
+      oldClearAllFiles();
+    }
+    if (client && client.connected) {
+      client.publish(SYNC_TOPIC, JSON.stringify({
+        sender: CLIENT_ID,
+        action: "CLEAR_ALL"
+      }));
+    }
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initRealtimeSync);
+  } else {
+    initRealtimeSync();
+  }
+})();
+</script>
     
 </body>
 </html>
